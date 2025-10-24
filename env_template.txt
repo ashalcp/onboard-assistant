@@ -1,0 +1,18 @@
+# Azure Authentication Configuration
+# Copy these values to a .env file in the same directory
+
+# Microsoft App Registration (for user authentication)
+AZURE_CLIENT_ID=your_azure_client_id_here
+AZURE_CLIENT_SECRET=your_azure_client_secret_here
+
+# Tenant IDs
+USER_TENANT_ID=your_user_tenant_id_here
+AZURE_AI_TENANT_ID=your_ai_tenant_id_here
+
+# Azure AI Project
+AZURE_AI_ENDPOINT=your_azure_ai_endpoint_here
+
+# Redirect URI - must match Azure App Registration
+REDIRECT_URI=http://localhost:8501
+
+
