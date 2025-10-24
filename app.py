@@ -533,14 +533,52 @@ def get_signature_for_storage():
 def display_signature_modal():
     """Display signature collection modal"""
     if st.session_state.show_signature_modal:
+        # Add JavaScript to auto-scroll to signature modal
+        st.markdown("""
+        <script>
+            // Auto-scroll to signature modal
+            setTimeout(function() {
+                window.scrollTo({
+                    top: document.body.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }, 300);
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Add a VERY prominent full-width banner at the top
+        st.markdown("""
+        <div style="
+            position: sticky;
+            top: 0;
+            z-index: 999;
+            background: #ff6b6b;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            animation: blink 1.5s infinite;
+        ">
+            ⬇️ SIGNATURE REQUIRED - SCROLL DOWN TO SIGN ⬇️
+        </div>
+        <style>
+            @keyframes blink {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.7; }
+            }
+        </style>
+        """, unsafe_allow_html=True)
+        
         # Add a large visual separator and alert
         st.markdown("---")
-        st.info("🎯 **Signature Modal is now open below** - Please scroll down to sign")
+        st.error("⚠️ **ATTENTION: Signature pad is open below** - Please scroll down to sign!")
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Create a prominent container with better styling
         st.markdown("""
-        <div style="
+        <div id="signature-modal" style="
             background: linear-gradient(135deg, #4CAF50, #45a049);
             color: white;
             padding: 25px;
