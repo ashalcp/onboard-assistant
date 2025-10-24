@@ -13,6 +13,6 @@ AZURE_AI_TENANT_ID=your_ai_tenant_id_here
 AZURE_AI_ENDPOINT=your_azure_ai_endpoint_here
 
 # Redirect URI - must match Azure App Registration
-REDIRECT_URI=http://localhost:8501
+REDIRECT_URI=ashal-hmb9d9cveye9ewge.canadacentral-01.azurewebsites.net
 
 
