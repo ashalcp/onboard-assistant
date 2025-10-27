@@ -386,33 +386,25 @@ def determine_account_type(user_data):
 
 # SIGNATURE COLLECTION FUNCTIONS
 def collect_signature():
-    """Display signature collection interface"""
-    # Header with clear instructions
+    """Display signature collection interface - streamlined"""
+    # Simple, clean header
     st.markdown("""
-    <div style="text-align: center; margin-bottom: 25px;">
-        <h3 style="color: #4CAF50; margin-bottom: 15px;">✍️ Digital Signature Required</h3>
-        <div style="background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 10px 0;">
-            <p style="color: #2e7d32; margin: 0; font-weight: 500;">
-                📱 <strong>Instructions:</strong> Draw your signature using your mouse, trackpad, or touchscreen
-            </p>
-        </div>
+    <div style="text-align: center; margin: 20px 0;">
+        <h3 style="color: #495057; margin-bottom: 10px;">✍️ Please sign below to complete your onboarding</h3>
+        <p style="color: #6c757d; font-size: 14px;">Draw your signature using your mouse, trackpad, or touchscreen</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Signature canvas container with better styling
+    # Clean canvas container
     st.markdown("""
     <div style="
-        border: 3px solid #4CAF50;
-        border-radius: 15px;
-        padding: 25px;
-        background: linear-gradient(135deg, #f8fff8, #ffffff);
-        margin: 20px 0;
+        border: 2px solid #ced4da;
+        border-radius: 8px;
+        padding: 20px;
+        background: white;
+        margin: 15px 0;
         text-align: center;
-        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.1);
     ">
-        <p style="color: #4CAF50; margin-bottom: 20px; font-size: 16px; font-weight: 600;">
-            🎨 Draw your signature in the area below
-        </p>
     """, unsafe_allow_html=True)
     
     # Initialize canvas reset counter if not exists
@@ -433,32 +425,21 @@ def collect_signature():
     
     st.markdown("</div>", unsafe_allow_html=True)
     
-    # Action buttons with better styling
-    st.markdown("""
-    <div style="text-align: center; margin-top: 25px;">
-        <p style="color: #666; margin-bottom: 15px; font-size: 14px;">
-            Use the buttons below to clear, cancel, or save your signature
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Simplified action buttons - streamlined UX with just Clear and Accept
+    st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns([1, 1, 1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     
     with col1:
-        if st.button("🗑️ Clear Canvas", key="clear_signature", help="Clear the signature canvas", use_container_width=True, type="secondary"):
+        if st.button("🔄 Clear", key="clear_signature", help="Clear and redraw your signature", use_container_width=True, type="secondary"):
             # Force canvas to reset by incrementing a counter
             if 'canvas_reset_counter' not in st.session_state:
                 st.session_state.canvas_reset_counter = 0
             st.session_state.canvas_reset_counter += 1
             st.rerun()
     
-    with col2:
-        if st.button("❌ Cancel", key="cancel_signature", help="Cancel signature collection", use_container_width=True, type="secondary"):
-            st.session_state.show_signature_modal = False
-            st.rerun()
-    
     with col3:
-        if st.button("✅ Save Signature", key="save_signature", help="Save your signature", use_container_width=True, type="primary"):
+        if st.button("✅ Accept", key="accept_signature", help="Accept this signature and continue", use_container_width=True, type="primary"):
             if canvas_result.image_data is not None:
                 # Check if signature is not empty (not all white)
                 if canvas_result.image_data.sum() < canvas_result.image_data.size * 255:
@@ -491,9 +472,9 @@ def collect_signature():
                     
                     st.rerun()
                 else:
-                    st.warning("⚠️ Please add your signature before saving - the canvas appears to be empty")
+                    st.error("⚠️ Please draw your signature in the canvas above")
             else:
-                st.warning("⚠️ Please draw your signature on the canvas before saving")
+                st.error("⚠️ Please draw your signature in the canvas above")
 
 def get_signature_tool_data():
     """Get signature data for Azure AI agent tool"""
@@ -531,12 +512,11 @@ def get_signature_for_storage():
         }
 
 def display_signature_modal():
-    """Display signature collection modal"""
+    """Display signature collection modal - streamlined version"""
     if st.session_state.show_signature_modal:
         # Add JavaScript to auto-scroll to signature modal
         st.markdown("""
         <script>
-            // Auto-scroll to signature modal
             setTimeout(function() {
                 window.scrollTo({
                     top: document.body.scrollHeight,
@@ -546,69 +526,18 @@ def display_signature_modal():
         </script>
         """, unsafe_allow_html=True)
         
-        # Add a VERY prominent full-width banner at the top
-        st.markdown("""
-        <div style="
-            position: sticky;
-            top: 0;
-            z-index: 999;
-            background: #ff6b6b;
-            color: white;
-            padding: 20px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: bold;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            animation: blink 1.5s infinite;
-        ">
-            ⬇️ SIGNATURE REQUIRED - SCROLL DOWN TO SIGN ⬇️
-        </div>
-        <style>
-            @keyframes blink {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.7; }
-            }
-        </style>
-        """, unsafe_allow_html=True)
-        
-        # Add a large visual separator and alert
+        # Simple, clean separator
         st.markdown("---")
-        st.error("⚠️ **ATTENTION: Signature pad is open below** - Please scroll down to sign!")
-        st.markdown("<br>", unsafe_allow_html=True)
         
-        # Create a prominent container with better styling
-        st.markdown("""
-        <div id="signature-modal" style="
-            background: linear-gradient(135deg, #4CAF50, #45a049);
-            color: white;
-            padding: 25px;
-            border-radius: 15px;
-            margin: 30px 0;
-            box-shadow: 0 10px 30px rgba(76, 175, 80, 0.4);
-            border: 3px solid #2e7d32;
-            animation: pulse 2s infinite;
-        ">
-            <h1 style="text-align: center; margin: 0; color: white; font-size: 2.5em;">✍️ Digital Signature Collection</h1>
-            <p style="text-align: center; margin-top: 10px; color: white; font-size: 1.2em;">Please sign in the box below</p>
-        </div>
-        <style>
-            @keyframes pulse {
-                0%, 100% { box-shadow: 0 10px 30px rgba(76, 175, 80, 0.4); }
-                50% { box-shadow: 0 10px 40px rgba(76, 175, 80, 0.6); }
-            }
-        </style>
-        """, unsafe_allow_html=True)
-        
-        # Create an expander-like container for the signature interface
+        # Streamlined canvas container - no extra UI, just canvas
         with st.container():
             st.markdown("""
             <div style="
-                background: white;
-                border: 3px solid #4CAF50;
-                border-radius: 15px;
+                background: #f8f9fa;
+                border: 2px solid #dee2e6;
+                border-radius: 10px;
                 padding: 30px;
-                margin: 10px 0;
-                box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+                margin: 20px 0;
             ">
             """, unsafe_allow_html=True)
             
@@ -616,7 +545,6 @@ def display_signature_modal():
             
             st.markdown("</div>", unsafe_allow_html=True)
         
-        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("---")
 
 def trigger_signature_collection():
@@ -1410,35 +1338,20 @@ with chat_container:
                 with st.chat_message("assistant", avatar=f"data:image/png;base64,{logo_base64}"):
                     st.markdown(message["content"])
                     
-                    # Check if this message needs a signature button
+                    # Check if this message needs signature collection
                     signature_triggers = [
                         "signature", "sign", "digital signature", "electronic signature",
                         "please sign", "signature required", "signature needed", "sign here",
-                        "draw your signature", "provide signature", "signature pad"
+                        "draw your signature", "provide signature", "signature pad", "signature_required"
                     ]
                     
-                    should_show_sig_button = any(trigger.lower() in message["content"].lower() for trigger in signature_triggers)
+                    should_show_signature = any(trigger.lower() in message["content"].lower() for trigger in signature_triggers)
                     
-                    # Only show button if signature not yet collected and message contains trigger words
-                    if should_show_sig_button and not st.session_state.signature_data:
-                        st.markdown("---")
-                        st.markdown("""
-                        <div style="
-                            background: linear-gradient(135deg, #4CAF50, #45a049);
-                            color: white;
-                            padding: 15px;
-                            border-radius: 10px;
-                            text-align: center;
-                            margin: 10px 0;
-                        ">
-                            <h4 style="margin: 0; color: white;">✍️ Digital Signature Required</h4>
-                            <p style="margin: 5px 0 0 0; color: white;">Click the button below to open the signature pad</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        if st.button("✍️ Open Signature Pad", key=f"trigger_signature_btn_{idx}", type="primary", use_container_width=True):
+                    # Auto-show signature canvas if needed and not yet collected
+                    if should_show_signature and not st.session_state.signature_data:
+                        # Automatically trigger signature modal without button
+                        if not st.session_state.show_signature_modal:
                             st.session_state.show_signature_modal = True
-                            st.rerun()
             else:
                 with st.chat_message("assistant", avatar="🤖"):
                     st.markdown(message["content"])
