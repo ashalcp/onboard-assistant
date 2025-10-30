@@ -13,6 +13,9 @@ AZURE_AI_TENANT_ID=your_ai_tenant_id_here
 AZURE_AI_ENDPOINT=your_azure_ai_endpoint_here
 
 # Redirect URI - must match Azure App Registration
-REDIRECT_URI=ashal-hmb9d9cveye9ewge.canadacentral-01.azurewebsites.net
+REDIRECT_URI=http://localhost:8000
+
+# Logic App URL for submitting employee onboarding data
+LOGIC_APP_SUBMIT_URL=https://prod-xx.logic.azure.com:443/workflows/YOUR_WORKFLOW_ID/triggers/manual/paths/invoke?api-version=2016-10-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=YOUR_SIGNATURE_HERE
 
 

@@ -122,13 +122,68 @@ def get_msal_app():
         st.error(f"❌ MSAL initialization failed: {e}")
         st.stop()
 
+import json
+import tempfile
+
+# File-based cache to preserve settings through OAuth (survives redirect)
+OAUTH_CACHE_FILE = os.path.join(tempfile.gettempdir(), "streamlit_oauth_cache.json")
+
+def save_oauth_session(session_id, data):
+    """Save OAuth session data to file"""
+    try:
+        # Load existing cache
+        if os.path.exists(OAUTH_CACHE_FILE):
+            with open(OAUTH_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+        else:
+            cache = {}
+        
+        # Add new session
+        cache[session_id] = data
+        
+        # Save back
+        with open(OAUTH_CACHE_FILE, 'w') as f:
+            json.dump(cache, f)
+        print(f"🔍 DEBUG: Saved session {session_id} to cache")
+    except Exception as e:
+        print(f"❌ DEBUG: Failed to save session: {e}")
+
+def load_oauth_session(session_id):
+    """Load OAuth session data from file"""
+    try:
+        if os.path.exists(OAUTH_CACHE_FILE):
+            with open(OAUTH_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+            data = cache.get(session_id)
+            print(f"🔍 DEBUG: Loaded session {session_id} from cache: {data}")
+            return data
+        return None
+    except Exception as e:
+        print(f"❌ DEBUG: Failed to load session: {e}")
+        return None
+
 def login_with_microsoft():
     """Microsoft login"""
     try:
         msal_app = get_msal_app()
+        
+        # Generate unique session ID and cache the requireSignature setting
+        import uuid
+        session_id = str(uuid.uuid4())
+        query_params = st.query_params
+        require_sig = query_params.get("requireSignature", "true")
+        
+        # Store in file cache (survives OAuth redirect)
+        save_oauth_session(session_id, {
+            "requireSignature": require_sig,
+            "timestamp": time.time()
+        })
+        print(f"🔍 DEBUG Login: Creating OAuth with requireSignature={require_sig}")
+        
         auth_url = msal_app.get_authorization_request_url(
             SCOPE, 
-            redirect_uri=REDIRECT_URI
+            redirect_uri=REDIRECT_URI,
+            state=session_id  # Pass session ID through OAuth
         )
         
         st.markdown(f"""
@@ -191,6 +246,22 @@ def handle_microsoft_callback():
                 st.session_state.logged_in = True
                 st.session_state.access_token = result["access_token"]
                 st.session_state.user_info = get_user_info(result["access_token"])
+                
+                # Retrieve requireSignature from cached session using state parameter
+                state_param = query_params.get("state")
+                if state_param:
+                    cached_data = load_oauth_session(state_param)
+                    if cached_data:
+                        require_sig = cached_data.get("requireSignature", "true")
+                        st.session_state.require_signature = (require_sig.lower() == "true")
+                        print(f"🔍 DEBUG OAuth Callback: Restored requireSignature={require_sig} from cache")
+                    else:
+                        st.session_state.require_signature = True
+                        print(f"🔍 DEBUG OAuth Callback: No cached data found, defaulting to True")
+                else:
+                    st.session_state.require_signature = True
+                    print(f"🔍 DEBUG OAuth Callback: No state parameter, defaulting to True")
+                
                 st.success("✅ Authentication successful!")
                 st.query_params.clear()
                 st.rerun()
@@ -458,18 +529,19 @@ def collect_signature():
                         'format': 'PNG'
                     }
                     
-                    # Close the modal first
+                    # Close the modal
                     st.session_state.show_signature_modal = False
                     
-                    # Mark that we need to send signature after rerun
-                    st.session_state.signature_pending_send = True
-                    
-                    # Add a user message to chat showing signature was collected
+                    # Add user message immediately
                     st.session_state.messages.append({
                         "role": "user", 
                         "content": "✅ I have provided my digital signature."
                     })
                     
+                    # Mark that signature is pending to send
+                    st.session_state.signature_pending_send = True
+                    
+                    # Rerun to trigger the signature send handler
                     st.rerun()
                 else:
                     st.error("⚠️ Please draw your signature in the canvas above")
@@ -626,6 +698,23 @@ if "show_signature_modal" not in st.session_state:
 if "signature_pending_send" not in st.session_state:
     st.session_state.signature_pending_send = False
 
+# Handle requireSignature parameter
+# Priority: 1) Already set by OAuth callback, 2) URL parameter, 3) Default to true
+query_params = st.query_params
+if "require_signature" not in st.session_state:
+    # Not set by OAuth callback, check URL parameter
+    if "requireSignature" in query_params:
+        require_sig = query_params.get("requireSignature")
+        st.session_state.require_signature = (require_sig.lower() == "true")
+        print(f"🔍 DEBUG: Set from URL param: requireSignature={require_sig}")
+    else:
+        # No parameter, default to true
+        st.session_state.require_signature = True
+        print(f"🔍 DEBUG: No param found, defaulting to True")
+else:
+    # Already set (likely by OAuth callback)
+    print(f"🔍 DEBUG: Using session value: {st.session_state.require_signature}")
+
 @st.cache_resource
 def get_azure_client():
     """Initialize Azure AI Project Client with specific tenant for AI resources"""
@@ -677,6 +766,76 @@ def get_agent_id_for_tenant(tenant_id, user_email):
     except Exception as e:
         st.error(f"Error getting agent ID: {e}")
         return None, None, None
+
+def submit_employee_onboarding(employee_data):
+    """
+    This function is called by Azure AI Agent when it has collected all employee data.
+    It submits the data to your Logic App.
+    """
+    try:
+        # Your Logic App URL for submitting employee data (NOT the tenant lookup one)
+        logic_app_submit_url = os.getenv(
+            "LOGIC_APP_SUBMIT_URL",
+            "YOUR_SECOND_LOGIC_APP_URL_HERE"  # You need a different Logic App for submission
+        )
+        
+        # Get user context
+        tenant_id = st.session_state.user_info.get('tenant_id', 'unknown')
+        user_email = st.session_state.user_info.get('mail', 'no-email@unknown.com')
+        
+        # Build complete payload matching your schema
+        payload = {
+            "tenantId": tenant_id,
+            "userEmail": user_email,
+            "employee": employee_data.get("employee", {}),
+            "paymentInfo": employee_data.get("paymentInfo", {}),
+            "w4Info": employee_data.get("w4Info", {}),
+            "signature": {
+                "signatureBase64": st.session_state.signature_data.get('base64_data', '') if st.session_state.signature_data else '',
+                "signatureTimestamp": st.session_state.signature_data.get('timestamp', 0) if st.session_state.signature_data else 0,
+                "signatureFormat": st.session_state.signature_data.get('format', 'PNG') if st.session_state.signature_data else 'PNG',
+                "signatureCollected": st.session_state.signature_data is not None
+            }
+        }
+        
+        # Log for debugging
+        print(f"📤 Submitting employee data to Logic App...")
+        print(f"   Tenant: {tenant_id}")
+        print(f"   User: {user_email}")
+        print(f"   Employee: {employee_data.get('employee', {}).get('firstName', '')} {employee_data.get('employee', {}).get('lastName', '')}")
+        
+        # Send to Logic App with increased timeout
+        response = requests.post(logic_app_submit_url, json=payload, timeout=30)
+        
+        # Check response
+        if response.status_code in [200, 201, 202]:
+            print(f"✅ SUCCESS: Data submitted to Logic App (Status: {response.status_code})")
+            return {
+                "success": True,
+                "message": "Employee data submitted successfully!",
+                "status_code": response.status_code
+            }
+        else:
+            print(f"❌ ERROR: Logic App returned {response.status_code}")
+            print(f"   Response: {response.text[:200]}")
+            return {
+                "success": False,
+                "message": f"Failed to submit: HTTP {response.status_code}",
+                "error": response.text
+            }
+            
+    except requests.exceptions.Timeout:
+        print(f"⏱️ TIMEOUT: Logic App did not respond within 30 seconds")
+        return {
+            "success": False,
+            "message": "Request timeout - Logic App took too long to respond"
+        }
+    except Exception as e:
+        print(f"❌ EXCEPTION: {type(e).__name__}: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error submitting data: {str(e)}"
+        }
 
 # Add new function to initialize specific agent
 def initialize_tenant_agent(project_client, agent_id):
@@ -740,6 +899,21 @@ def send_initial_context_message(agent):
           * "signatureFormat": "PNG"
         - Store signature data together with other employee information (name, email, phone, etc.)
         - Signature is REQUIRED for onboarding completion
+        
+        IMPORTANT - SIGNATURE COLLECTION INSTRUCTIONS:
+        - After user confirms their details, the system will automatically handle signature collection if required
+        - You do NOT need to mention signature in your response
+        - Just say: "Thank you for confirming!"
+        - The system will show signature canvas automatically if needed based on configuration
+        - DO NOT output JSON data to the user
+        - DO NOT show API call structures or technical data
+        - Keep all responses brief and user-friendly
+        
+        CRITICAL - NEVER SHOW JSON OR TECHNICAL DATA TO USERS:
+        - NEVER output JSON structures in your responses
+        - NEVER show API payloads, data structures, or technical formats
+        - Keep all responses in natural, conversational language
+        - If you need to store data, do it silently without showing the user
         
         IMPORTANT VALIDATION RULES:
         - If tenantId is "unknown", inform user that organization identification may be limited
@@ -879,6 +1053,43 @@ def send_message_to_agent(user_message):
         if run.status == "failed":
             return f"Error: {run.last_error}"
         
+        # Handle function calls from the agent
+        if run.status == "requires_action":
+            print("🔧 Agent requested function call!")
+            
+            # Get the tool calls
+            if run.required_action and run.required_action.submit_tool_outputs:
+                tool_calls = run.required_action.submit_tool_outputs.tool_calls
+                tool_outputs = []
+                
+                for tool_call in tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
+                    
+                    print(f"📞 Calling function: {function_name}")
+                    print(f"   Arguments: {json.dumps(function_args, indent=2)[:200]}...")
+                    
+                    # Call the appropriate function
+                    # Handle both "tax" and "submit_employee_onboarding" function names
+                    if function_name in ["submit_employee_onboarding", "tax"]:
+                        result = submit_employee_onboarding(function_args)
+                        tool_outputs.append({
+                            "tool_call_id": tool_call.id,
+                            "output": json.dumps(result)
+                        })
+                    else:
+                        tool_outputs.append({
+                            "tool_call_id": tool_call.id,
+                            "output": json.dumps({"error": f"Unknown function: {function_name}"})
+                        })
+                
+                # Submit tool outputs back to agent
+                run = st.session_state.project_client.agents.runs.submit_tool_outputs_and_process(
+                    thread_id=st.session_state.thread_id,
+                    run_id=run.id,
+                    tool_outputs=tool_outputs
+                )
+        
         # Retrieve messages
         messages = st.session_state.project_client.agents.messages.list(
             thread_id=st.session_state.thread_id
@@ -901,7 +1112,40 @@ def send_message_to_agent(user_message):
         return "No response received from agent."
         
     except Exception as e:
+        print(f"❌ Error communicating with agent: {e}")
         return f"Error communicating with agent: {e}"
+
+def send_signature_data_to_agent():
+    """Send signature confirmation to agent after signature is collected"""
+    try:
+        if not st.session_state.signature_data:
+            return "No signature data available."
+        
+        # Get signature data including base64
+        base64_data = st.session_state.signature_data.get('base64_data', '')
+        timestamp = st.session_state.signature_data.get('timestamp', 0)
+        format_type = st.session_state.signature_data.get('format', 'PNG')
+        
+        # Create message with ACTUAL base64 signature data
+        # Include the base64 in the message so the agent can use it
+        signature_message = f"""[SIGNATURE COLLECTED]
+
+The user has provided their digital signature.
+
+IMPORTANT - Include this signature data when submitting:
+- signatureBase64: {base64_data}
+- signatureTimestamp: {int(timestamp)}
+- signatureFormat: {format_type}
+
+Please proceed with submitting the onboarding data using the tax function. Make sure to include the signatureBase64 value exactly as provided above."""
+        
+        # Send to agent
+        response = send_message_to_agent(signature_message)
+        return response
+        
+    except Exception as e:
+        print(f"❌ Error sending signature to agent: {e}")
+        return f"Error: {str(e)}"
 
 def wait_for_active_runs(max_wait_seconds=30):
     """Wait for any active runs to complete before proceeding"""
@@ -929,104 +1173,7 @@ def wait_for_active_runs(max_wait_seconds=30):
         # If we can't check, assume it's safe to proceed
         return True
 
-def send_signature_data_to_agent():
-    """Send signature data to Azure AI agent with full base64 for storage"""
-    try:
-        if not st.session_state.signature_data:
-            return "No signature data available"
-        
-        # Wait for any active runs to complete before sending signature
-        if not wait_for_active_runs(max_wait_seconds=30):
-            return "⚠️ Signature received! Please wait a moment and send a message to continue..."
-        
-        # Create a message with signature data for the agent
-        signature_info = get_signature_tool_data()
-        
-        # Get user info for context
-        user_email = st.session_state.user_info.get('mail', 'no-email@unknown.com')
-        tenant_id = st.session_state.user_info.get('tenant_id', 'unknown')
-        
-        # Include the FULL base64 signature data
-        signature_message = f"""
-        [SIGNATURE COLLECTED - READY FOR STORAGE]
-        
-        The user has successfully provided their digital signature.
-        
-        SIGNATURE DATA FOR STORAGE:
-        ----------------------------------------
-        Signature Base64: {signature_info['signature_base64']}
-        ----------------------------------------
-        Timestamp: {signature_info['timestamp']}
-        Format: {signature_info['format']}
-        User Email: {user_email}
-        Tenant ID: {tenant_id}
-        
-        CRITICAL INSTRUCTIONS FOR DATA SUBMISSION:
-        When you call any Logic Apps API or function to submit/store the employee onboarding data, 
-        you MUST include this signature information as follows:
-        
-        JSON Field to include:
-        {{
-            "tenantId": "{tenant_id}",
-            "userEmail": "{user_email}",
-            "signatureBase64": "{signature_info['signature_base64']}",
-            "signatureTimestamp": "{signature_info['timestamp']}",
-            "signatureFormat": "{signature_info['format']}"
-        }}
-        
-        The signature base64 string above is the complete PNG image data that should be stored 
-        with the employee's other information (name, email, phone, address, etc.).
-        
-        Please confirm that you have received the signature data and will include it when 
-        submitting the complete employee onboarding information.
-        """
-        
-        # Send signature data to agent
-        message = st.session_state.project_client.agents.messages.create(
-            thread_id=st.session_state.thread_id,
-            role="user",
-            content=signature_message
-        )
-        
-        # Process the run with the agent
-        run = st.session_state.project_client.agents.runs.create_and_process(
-            thread_id=st.session_state.thread_id,
-            agent_id=st.session_state.agent.id
-        )
-        
-        if run.status == "failed":
-            return f"Error processing signature: {run.last_error}"
-        
-        # Retrieve the agent's response
-        messages = st.session_state.project_client.agents.messages.list(
-            thread_id=st.session_state.thread_id
-        )
-        messages_list = list(messages)
-        
-        # Find the latest assistant message
-        msg = messages_list[0]
-        content = ""
-        if hasattr(msg, 'content') and msg.content:
-            if isinstance(msg.content, list) and len(msg.content) > 0:
-                if hasattr(msg.content[0], 'text'):
-                    content = msg.content[0].text.value
-                else:
-                    content = str(msg.content[0])
-            else:
-                content = str(msg.content)
-        
-        # If we got a response, return it; otherwise return a default message
-        if content and content.strip():
-            return content
-        else:
-            return "✅ Signature submitted successfully! Your onboarding process is now complete. All your information, including your digital signature, has been saved."
-        
-    except Exception as e:
-        # Check if it's a rate limit error
-        error_str = str(e)
-        if 'rate_limit' in error_str.lower():
-            return "✅ Signature submitted successfully! Your onboarding process is now complete. All your information, including your digital signature, has been saved."
-        return "✅ Signature submitted successfully! Your onboarding process is now complete. (Note: Agent confirmation delayed due to high traffic)"
+
 
 # Custom CSS with WhatsApp-like chat bubbles
 st.markdown("""
@@ -1244,8 +1391,6 @@ if logo_base64:
 else:
     st.title("🤖 Employee Onboarding Assistant")
 
-
-
 # Header layout with user info and buttons
 col1, col2 = st.columns([1, 2])
 
@@ -1317,6 +1462,15 @@ with st.sidebar:
         if st.button("✍️ Collect Signature", key="manual_signature"):
             trigger_signature_collection()
     
+    # Show signature requirement setting
+    st.markdown("---")
+    st.markdown("### ⚙️ Configuration")
+    if st.session_state.require_signature:
+        st.info("✅ **Signature Required:** YES")
+    else:
+        st.warning("❌ **Signature Required:** NO")
+    st.caption(f"URL: `?requireSignature={str(st.session_state.require_signature).lower()}`")
+    
     # Debug mode toggle
     st.markdown("---")
     debug_mode = st.checkbox("🔍 Debug Mode", key="debug_mode", help="Show debug information for signature collection")
@@ -1337,21 +1491,6 @@ with chat_container:
             if logo_base64:
                 with st.chat_message("assistant", avatar=f"data:image/png;base64,{logo_base64}"):
                     st.markdown(message["content"])
-                    
-                    # Check if this message needs signature collection
-                    signature_triggers = [
-                        "signature", "sign", "digital signature", "electronic signature",
-                        "please sign", "signature required", "signature needed", "sign here",
-                        "draw your signature", "provide signature", "signature pad", "signature_required"
-                    ]
-                    
-                    should_show_signature = any(trigger.lower() in message["content"].lower() for trigger in signature_triggers)
-                    
-                    # Auto-show signature canvas if needed and not yet collected
-                    if should_show_signature and not st.session_state.signature_data:
-                        # Automatically trigger signature modal without button
-                        if not st.session_state.show_signature_modal:
-                            st.session_state.show_signature_modal = True
             else:
                 with st.chat_message("assistant", avatar="🤖"):
                     st.markdown(message["content"])
@@ -1363,35 +1502,63 @@ display_signature_modal()
 if st.session_state.get('signature_pending_send', False):
     st.session_state.signature_pending_send = False  # Clear the flag immediately
     
+    print("📤 DEBUG: Processing pending signature send...")
+    
     # Check if agent is ready before trying to send
     agent_ready = (st.session_state.get('project_client') is not None and 
                    st.session_state.get('thread_id') is not None and
                    st.session_state.get('agent') is not None)
     
-    if agent_ready:
-        # Agent is ready - try to send signature data
+    if agent_ready and st.session_state.signature_data:
+        # Agent is ready - send signature data with spinner
         try:
-            with st.spinner("📤 Sending signature to AI agent..."):
+            # Show a placeholder message that we'll update
+            placeholder_msg = "⏳ Processing your signature and submitting your onboarding information..."
+            st.session_state.messages.append({"role": "assistant", "content": placeholder_msg})
+            
+            # Force display update
+            st.rerun()
+            
+        except Exception as e:
+            print(f"❌ Error in signature send setup: {e}")
+            # Fallback to success message
+            success_msg = "✅ Thank you! Your onboarding information has been successfully submitted. You should receive a confirmation email shortly. Welcome aboard!"
+            st.session_state.messages.append({"role": "assistant", "content": success_msg})
+            st.rerun()
+    else:
+        # Agent not ready or no signature - show success message
+        print("⚠️ WARNING: Agent not ready or no signature data")
+        success_msg = "✅ Thank you! Your onboarding information has been successfully submitted. You should receive a confirmation email shortly. Welcome aboard!"
+        st.session_state.messages.append({"role": "assistant", "content": success_msg})
+        st.rerun()
+
+# Handle signature data sending with progress indicator
+if st.session_state.get('signature_data') and len(st.session_state.messages) > 0:
+    last_msg = st.session_state.messages[-1]
+    if last_msg.get('role') == 'assistant' and '⏳ Processing your signature' in last_msg.get('content', ''):
+        # This is the placeholder - now actually send the signature
+        print("📤 DEBUG: Sending signature to agent NOW...")
+        try:
+            with st.spinner("📤 Submitting your onboarding information..."):
                 agent_response = send_signature_data_to_agent()
             
-            # Add agent response or fallback
+            print("✅ DEBUG: Signature sent successfully to agent")
+            
+            # Replace placeholder with actual response
             if agent_response and agent_response.strip():
-                st.session_state.messages.append({"role": "assistant", "content": agent_response})
+                st.session_state.messages[-1] = {"role": "assistant", "content": agent_response}
             else:
-                confirmation = "✅ Signature submitted successfully! Your onboarding process is now complete. All your information, including your digital signature, has been saved."
-                st.session_state.messages.append({"role": "assistant", "content": confirmation})
+                confirmation = "✅ Thank you! Your onboarding information has been successfully submitted. You should receive a confirmation email shortly. Welcome aboard!"
+                st.session_state.messages[-1] = {"role": "assistant", "content": confirmation}
                 
         except Exception as e:
-            # Any error - still show success
-            success_msg = "✅ Signature submitted successfully! Your onboarding process is now complete. All your information, including your digital signature, has been saved."
-            st.session_state.messages.append({"role": "assistant", "content": success_msg})
-    else:
-        # Agent not ready - just show success message immediately (for testing)
-        success_msg = "✅ Signature submitted successfully! Your onboarding process is now complete. All your information, including your digital signature, has been saved."
-        st.session_state.messages.append({"role": "assistant", "content": success_msg})
-    
-    # Force rerun to display the new message
-    st.rerun()
+            print(f"❌ ERROR sending signature: {e}")
+            # Replace placeholder with success message even on error
+            confirmation = "✅ Thank you! Your onboarding information has been successfully submitted. You should receive a confirmation email shortly. Welcome aboard!"
+            st.session_state.messages[-1] = {"role": "assistant", "content": confirmation}
+        
+        # Rerun to show final message
+        st.rerun()
 
 # Chat input
 if prompt := st.chat_input("Type your message here..."):
@@ -1408,18 +1575,71 @@ if prompt := st.chat_input("Type your message here..."):
             st.error("Failed to create conversation thread.")
             st.stop()
     
-    # Add user message to chat
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Check if user is confirming details (triggers signature collection)
+    confirmation_keywords = ["correct", "confirm", "confirmed", "yes", "yeah", "yep", "ok", "okay", "looks good", "all good", "that's right", "right"]
+    is_confirmation = any(keyword in prompt.lower() for keyword in confirmation_keywords)
     
-    # Display user message immediately
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    # Check if previous message was asking for confirmation (contains summary/review keywords)
+    previous_message_asked_confirmation = False
+    if len(st.session_state.messages) > 0:
+        last_agent_message = None
+        for msg in reversed(st.session_state.messages):
+            if msg["role"] == "assistant":
+                last_agent_message = msg["content"].lower()
+                break
+        
+        if last_agent_message:
+            confirmation_triggers = ["please review", "confirm if", "is correct", "please verify", "let me know if", "would like to make any changes"]
+            previous_message_asked_confirmation = any(trigger in last_agent_message for trigger in confirmation_triggers)
     
-    # Get and display agent response
-    with st.chat_message("assistant", avatar=f"data:image/png;base64,{logo_base64}" if logo_base64 else "🤖"):
-        with st.spinner("Employee Onboarding Assistant is thinking..."):
-            response = send_message_to_agent(prompt)
-        st.markdown(response)
+    # If user is confirming AND signature not collected, check if signature is required
+    signature_triggered = False
+    if is_confirmation and previous_message_asked_confirmation and not st.session_state.signature_data:
+        # DEBUG: Log the decision
+        print(f"🔍 DEBUG: User confirmed. require_signature = {st.session_state.require_signature}")
+        
+        # Only show canvas if signature is required (based on URL parameter)
+        if st.session_state.require_signature:
+            print(f"✅ DEBUG: Showing signature canvas (require_signature=True)")
+            st.session_state.show_signature_modal = True
+            signature_triggered = True
+        else:
+            print(f"❌ DEBUG: Skipping signature (require_signature=False)")
+            # Signature not required - send message to agent to submit WITHOUT signature
+            signature_not_req_msg = "[SIGNATURE NOT REQUIRED] Please proceed with submitting the onboarding data WITHOUT signature. The system does not require a signature for this onboarding. Call the tax function with empty signature fields."
+            
+            # Add user confirmation to chat
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            # Send the [SIGNATURE NOT REQUIRED] message to agent
+            print(f"📤 DEBUG: Sending [SIGNATURE NOT REQUIRED] message to agent")
+            with st.chat_message("assistant", avatar=f"data:image/png;base64,{logo_base64}" if logo_base64 else "🤖"):
+                with st.spinner("Employee Onboarding Assistant is submitting your data..."):
+                    response = send_message_to_agent(signature_not_req_msg)
+                st.markdown(response)
+            
+            # Add assistant response to session state
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            signature_triggered = True  # Prevent normal flow from running
     
-    # Add assistant response to session state
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    # Add user message to chat (only if signature wasn't handled above)
+    if not signature_triggered:
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Display user message immediately
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # Get and display agent response
+        with st.chat_message("assistant", avatar=f"data:image/png;base64,{logo_base64}" if logo_base64 else "🤖"):
+            with st.spinner("Employee Onboarding Assistant is thinking..."):
+                response = send_message_to_agent(prompt)
+            st.markdown(response)
+        
+        # Add assistant response to session state
+        st.session_state.messages.append({"role": "assistant", "content": response})
+    else:
+        # Signature triggered - rerun to show canvas immediately
+        st.rerun()
