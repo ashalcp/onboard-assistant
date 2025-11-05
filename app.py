@@ -69,17 +69,33 @@ CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
 
 # Separate tenant IDs for different purposes
-USER_TENANT_ID = os.getenv("USER_TENANT_ID")  # For user authentication
+USER_TENANT_ID = os.getenv("USER_TENANT_ID")  # For user authentication (use "common" or "organizations" for multi-tenant)
 AZURE_AI_TENANT_ID = os.getenv("AZURE_AI_TENANT_ID")    # For Azure AI Project access
 
 
 # Azure AI Project endpoint - make configurable
 AZURE_AI_ENDPOINT = os.getenv("AZURE_AI_ENDPOINT")
 
-REDIRECT_URI = os.getenv("REDIRECT_URI","http://localhost:8501")
+REDIRECT_URI = os.getenv("REDIRECT_URI","http://localhost:8000")
 
 # MSAL Configuration for user authentication (supports multitenant)
-AUTHORITY = f"https://login.microsoftonline.com/{USER_TENANT_ID}"
+# IMPORTANT: To allow all users from the Excel file (different tenants) to login, 
+# set USER_TENANT_ID to "organizations" or "common" in your .env file
+# 
+# Options:
+#   - "common" = Allow any Microsoft account (personal + work/school)
+#   - "organizations" = Allow any work/school account from any tenant (MULTI-TENANT - Recommended)
+#   - Specific tenant ID = Only allow users from that specific tenant (SINGLE-TENANT)
+#
+# Default: "organizations" (allows all work/school accounts from any tenant)
+if USER_TENANT_ID and USER_TENANT_ID.lower() in ["common", "organizations"]:
+    AUTHORITY = f"https://login.microsoftonline.com/{USER_TENANT_ID.lower()}"
+elif USER_TENANT_ID:
+    # Specific tenant ID provided - single tenant mode
+    AUTHORITY = f"https://login.microsoftonline.com/{USER_TENANT_ID}"
+else:
+    # Default to multi-tenant mode to allow all users from Excel file
+    AUTHORITY = "https://login.microsoftonline.com/organizations"
 SCOPE = [
     "User.Read",
     "User.Read.All",  # For additional user properties
